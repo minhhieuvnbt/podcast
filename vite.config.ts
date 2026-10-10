@@ -7,25 +7,27 @@ import { defineConfig } from 'vite';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig(() => ({
-  // GitHub Pages:
-  // https://minhhieuvnbt.github.io/podcast/
-  base: '/podcast/',
+export default defineConfig(() => {
+  return {
+    // GitHub Pages:
+    // https://minhhieuvnbt.github.io/podcast/
+    base: '/podcast/',
 
-  plugins: [
-    react(),
-    tailwindcss(),
-  ],
+    plugins: [
+      react(),
+      tailwindcss(),
+    ],
 
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, '.'),
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, '.'),
+      },
     },
-  },
 
-  server: {
-    // Giữ nguyên cấu hình dành cho Google AI Studio
-    hmr: process.env.DISABLE_HMR !== 'true',
-    watch: process.env.DISABLE_HMR === 'true' ? null : {},
-  },
-}));
+    server: {
+      // Giữ cấu hình dành cho Google AI Studio
+      hmr: process.env.DISABLE_HMR !== 'true',
+      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+    },
+  };
+});
