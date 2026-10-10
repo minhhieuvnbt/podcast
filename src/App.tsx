@@ -41,6 +41,7 @@ import { ConnectModal } from './components/ConnectModal';
 import { formatSeconds } from './utils/youtube';
 
 const STORAGE_KEY_USER_EPISODES = 'casttube_user_episodes_v2';
+const API_BASE = 'https://minhhieuvnbt.github.io/podcast';
 const STORAGE_KEY_FAVORITES = 'casttube_user_favorites';
 const STORAGE_KEY_NOTES = 'casttube_user_notes';
 const STORAGE_KEY_SUBS = 'casttube_user_subs';
@@ -154,7 +155,7 @@ export default function App() {
   const fetchFullChannelData = async (targetUrl = 'https://www.youtube.com/@minhhieureviewphim') => {
     setIsLoadingChannel(true);
     try {
-      const response = await fetch(`/api/podcast/channel-full?url=${encodeURIComponent(targetUrl)}`);
+      const response = await fetch(`${API_BASE}/api/podcast/channel-full?url=${encodeURIComponent(targetUrl)}`);
       const data = await response.json();
 
       if (!response.ok) {
@@ -253,7 +254,7 @@ export default function App() {
     setIsCheckingUpdates(true);
     try {
       const res = await fetch(
-        `/api/podcast/check-updates?url=https://www.youtube.com/@minhhieureviewphim&_nocache=${Date.now()}`
+        `${API_BASE}/api/podcast/check-updates?url=${encodeURIComponent('https://www.youtube.com/@minhhieureviewphim')}&_nocache=${Date.now()}`
       );
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -393,7 +394,7 @@ export default function App() {
   const handlePlaySpecificPlaylist = async (playlistUrl: string, playlistTitle: string) => {
     showToast(`Đang tải toàn bộ video trong danh sách phát "${playlistTitle}"...`);
     try {
-      const res = await fetch(`/api/podcast/playlist?url=${encodeURIComponent(playlistUrl)}`);
+      const res = await fetch(`${API_BASE}/api/podcast/playlist?url=${encodeURIComponent(playlistUrl)}`);
       const data = await res.json();
       if (data.episodes && data.episodes.length > 0) {
         const eps: PodcastEpisode[] = data.episodes.map((v: any, idx: number) => ({
