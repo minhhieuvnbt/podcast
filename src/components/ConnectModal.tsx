@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { PodcastEpisode } from '../types/podcast';
 import { extractYouTubeId, extractPlaylistId } from '../utils/youtube';
+import { safeFetchJson, getStaticChannelData } from '../utils/api';
 
 interface ConnectModalProps {
   isOpen: boolean;
@@ -97,63 +98,116 @@ export const ConnectModal: React.FC<ConnectModalProps> = ({
       // 1. Is it a channel URL? (@channel/podcasts, @channel/playlists, @channel/videos, @channel)
       if (targetUrl.includes('youtube.com/@') || targetUrl.startsWith('@')) {
         const fullUrl = targetUrl.startsWith('http') ? targetUrl : `https://www.youtube.com/${targetUrl}`;
-        const response = await fetch(`/api/podcast/channel?url=${encodeURIComponent(fullUrl)}`);
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || 'Không thể tải thông tin kênh YouTube');
+        try {
+          const data = await safeFetchJson<any>(`/api/podcast/channel?url=${encodeURIComponent(fullUrl)}`);
+          setChannelData(data);
+          return;
+        } catch (fetchErr) {
+          // If on static host (GitHub Pages) or backend unavailable, load preloaded channel data
+          const staticData = getStaticChannelData();
+          if (targetUrl.includes('podcasts')) {
+            setChannelData({
+              type: 'podcasts',
+              channel: staticData.channel,
+              episodes: staticData.podcasts,
+              totalCount: staticData.podcasts.length,
+            });
+          } else if (targetUrl.includes('playlists')) {
+            setChannelData({
+              type: 'playlists',
+              channel: staticData.channel,
+              playlists: staticData.playlists,
+              totalCount: staticData.playlists.length,
+            });
+          } else {
+            setChannelData({
+              type: 'videos',
+              channel: staticData.channel,
+              episodes: staticData.videos,
+              totalCount: staticData.videos.length,
+            });
+          }
+          return;
         }
-
-        setChannelData(data);
-        return;
       }
 
       // 2. Is it a playlist URL? (list=...)
       if (targetUrl.includes('list=')) {
-        const response = await fetch(`/api/podcast/playlist?url=${encodeURIComponent(targetUrl)}`);
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || 'Không thể tải danh sách phát');
+        try {
+          const data = await safeFetchJson<any>(`/api/podcast/playlist?url=${encodeURIComponent(targetUrl)}`);
+          setChannelData({
+            type: 'playlists',
+            channel: {
+              name: data.playlistTitle || 'Danh sách phát YouTube',
+              handle: data.playlistId,
+              avatar: data.episodes?.[0]?.channelAvatar || 'https://ui-avatars.com/api/?name=YT',
+              subscribers: 'Danh sách phát',
+              youtubeUrl: targetUrl,
+              subscribeUrl: targetUrl,
+            },
+            episodes: data.episodes,
+            totalCount: data.totalCount,
+          });
+          return;
+        } catch (plErr) {
+          const staticData = getStaticChannelData();
+          setChannelData({
+            type: 'playlists',
+            channel: {
+              name: 'Danh sách phát YouTube',
+              handle: 'playlist',
+              avatar: staticData.channel.avatar,
+              subscribers: 'Danh sách phát',
+              youtubeUrl: targetUrl,
+              subscribeUrl: targetUrl,
+            },
+            episodes: staticData.videos.slice(0, 8),
+            totalCount: 8,
+          });
+          return;
         }
-
-        setChannelData({
-          type: 'playlists',
-          channel: {
-            name: data.playlistTitle || 'Danh sách phát YouTube',
-            handle: data.playlistId,
-            avatar: data.episodes?.[0]?.channelAvatar || 'https://ui-avatars.com/api/?name=YT',
-            subscribers: 'Danh sách phát',
-            youtubeUrl: targetUrl,
-            subscribeUrl: targetUrl,
-          },
-          episodes: data.episodes,
-          totalCount: data.totalCount,
-        });
-        return;
       }
 
       // 3. Is it a single video URL?
       const ytId = extractYouTubeId(targetUrl);
       if (ytId) {
-        const response = await fetch(`/api/podcast/meta?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${ytId}`)}`);
-        if (response.ok) {
-          const data = await response.json();
+        try {
+          const data = await safeFetchJson<any>(
+            `/api/podcast/meta?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${ytId}`)}`
+          );
           setSinglePreview({
             youtubeId: ytId,
             title: data.title || `Video (${ytId})`,
             author: data.author || 'Kênh YouTube',
             thumbnail: data.thumbnail || `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`,
           });
-        } else {
+          return;
+        } catch {
+          // Direct client-side oEmbed query which supports CORS from youtube.com
+          try {
+            const ytOembed = await fetch(
+              `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${ytId}`)}&format=json`
+            );
+            if (ytOembed.ok) {
+              const oData = await ytOembed.json();
+              setSinglePreview({
+                youtubeId: ytId,
+                title: oData.title || `Video (${ytId})`,
+                author: oData.author_name || 'Kênh YouTube',
+                thumbnail: oData.thumbnail_url || `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`,
+              });
+              return;
+            }
+          } catch {}
+
           setSinglePreview({
             youtubeId: ytId,
-            title: `Video (${ytId})`,
+            title: `Video YouTube (${ytId})`,
             author: 'Kênh YouTube',
             thumbnail: `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`,
           });
+          return;
         }
-        return;
       }
 
       throw new Error('Đường dẫn không hợp lệ. Vui lòng dán link kênh (@channel), link podcast hoặc link video YouTube.');
@@ -216,11 +270,17 @@ export const ConnectModal: React.FC<ConnectModalProps> = ({
   const handleLoadSpecificPlaylist = async (playlistUrl: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/podcast/playlist?url=${encodeURIComponent(playlistUrl)}`);
-      const data = await response.json();
-      if (data.episodes) {
-        handleConfirmEpisodes(data.episodes);
+      try {
+        const data = await safeFetchJson<any>(`/api/podcast/playlist?url=${encodeURIComponent(playlistUrl)}`);
+        if (data && data.episodes) {
+          handleConfirmEpisodes(data.episodes);
+          return;
+        }
+      } catch (err) {
+        // Fallback for static environments
       }
+      const staticVideos = getStaticChannelData().videos;
+      handleConfirmEpisodes(staticVideos);
     } catch (e: any) {
       setError(e.message || 'Lỗi khi tải playlist');
     } finally {

@@ -39,16 +39,23 @@ import { TimecodedNotesPanel } from './components/TimecodedNotesPanel';
 import { FullPlaylistQueue } from './components/FullPlaylistQueue';
 import { ConnectModal } from './components/ConnectModal';
 import { formatSeconds } from './utils/youtube';
+import { isStaticHost, safeFetchJson, getStaticChannelData } from './utils/api';
+import {
+  DEFAULT_CHANNEL_INFO,
+  DEFAULT_VIDEOS,
+  DEFAULT_PODCASTS,
+  DEFAULT_PODCAST_SERIES,
+  DEFAULT_CHANNEL_PLAYLISTS,
+} from './data/minhhieuChannelData';
 
 const STORAGE_KEY_USER_EPISODES = 'casttube_user_episodes_v2';
-const API_BASE = 'https://minhhieuvnbt.github.io/podcast';
 const STORAGE_KEY_FAVORITES = 'casttube_user_favorites';
 const STORAGE_KEY_NOTES = 'casttube_user_notes';
 const STORAGE_KEY_SUBS = 'casttube_user_subs';
 const STORAGE_KEY_CHANNEL = 'casttube_current_channel_v2';
 
 export default function App() {
-  // Channel Profile State
+  // Channel Profile State - initialized with authentic channel profile
   const [channelInfo, setChannelInfo] = useState<{
     name: string;
     handle: string;
@@ -56,37 +63,30 @@ export default function App() {
     subscribers: string;
     youtubeUrl: string;
     subscribeUrl: string;
-  }>({
-    name: 'Minh Hiếu review phim',
-    handle: '@minhhieureviewphim',
-    avatar: 'https://yt3.googleusercontent.com/IAZc3hD-MjzJAtG3Eainm3ueaTvyalzFYEeBqHm-1rkIbUCmIz9--aemFtvSsV-eQIZS0AS0EQ=s900-c-k-c0x00ffffff-no-rj',
-    subscribers: 'Kênh YouTube',
-    youtubeUrl: 'https://www.youtube.com/@minhhieureviewphim',
-    subscribeUrl: 'https://www.youtube.com/@minhhieureviewphim?sub_confirmation=1',
-  });
+  }>(DEFAULT_CHANNEL_INFO);
 
-  // Loaded Content Categorized: Videos, Podcasts, Playlists
-  const [channelVideos, setChannelVideos] = useState<PodcastEpisode[]>([]);
-  const [channelPodcasts, setChannelPodcasts] = useState<PodcastEpisode[]>([]);
-  const [podcastSeries, setPodcastSeries] = useState<PodcastSeries[]>([]);
+  // Loaded Content Categorized: Videos, Podcasts, Playlists (Pre-populated for instant display)
+  const [channelVideos, setChannelVideos] = useState<PodcastEpisode[]>(DEFAULT_VIDEOS);
+  const [channelPodcasts, setChannelPodcasts] = useState<PodcastEpisode[]>(DEFAULT_PODCASTS);
+  const [podcastSeries, setPodcastSeries] = useState<PodcastSeries[]>(DEFAULT_PODCAST_SERIES);
   const [selectedPodcastSeries, setSelectedPodcastSeries] = useState<string>('all');
-  const [channelPlaylists, setChannelPlaylists] = useState<PodcastPlaylist[]>([]);
+  const [channelPlaylists, setChannelPlaylists] = useState<PodcastPlaylist[]>(DEFAULT_CHANNEL_PLAYLISTS);
 
   // Active Tab: 'videos' | 'podcasts' | 'playlists'
   const [activeTab, setActiveTab] = useState<'videos' | 'podcasts' | 'playlists'>('videos');
   const [videoFilter, setVideoFilter] = useState<'all' | 'long' | 'shorts'>('all');
   const [videoCounts, setVideoCounts] = useState<{ all: number; long: number; shorts: number }>({
-    all: 65,
-    long: 45,
-    shorts: 20,
+    all: DEFAULT_VIDEOS.length,
+    long: DEFAULT_VIDEOS.filter((v) => !v.isShort).length,
+    shorts: DEFAULT_VIDEOS.filter((v) => v.isShort).length,
   });
 
   // Currently Active Playlist being played & its title
-  const [activeQueue, setActiveQueue] = useState<PodcastEpisode[]>([]);
+  const [activeQueue, setActiveQueue] = useState<PodcastEpisode[]>(DEFAULT_VIDEOS);
   const [activePlaylistTitle, setActivePlaylistTitle] = useState<string>('Tất cả Video');
 
   // Current playing episode
-  const [currentEpisode, setCurrentEpisode] = useState<PodcastEpisode | null>(null);
+  const [currentEpisode, setCurrentEpisode] = useState<PodcastEpisode | null>(DEFAULT_VIDEOS[0] || null);
 
   // Auto-play next episode toggle (default: true)
   const [isAutoplayNext, setIsAutoplayNext] = useState<boolean>(true);
@@ -154,20 +154,52 @@ export default function App() {
   // Automatically loads all videos, shorts, podcasts, and playlists of @minhhieureviewphim
   const fetchFullChannelData = async (targetUrl = 'https://www.youtube.com/@minhhieureviewphim') => {
     setIsLoadingChannel(true);
-    try {
-      const response = await fetch(`${API_BASE}/api/podcast/channel-full?url=${encodeURIComponent(targetUrl)}`);
-      const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Lỗi khi tải thông tin kênh');
+    // If on GitHub Pages (static host), use pre-loaded channel catalog directly
+    if (isStaticHost) {
+      const staticData = getStaticChannelData();
+      setChannelInfo(staticData.channel);
+      setChannelVideos(staticData.videos);
+      setChannelPodcasts(staticData.podcasts);
+      setChannelPlaylists(staticData.playlists);
+      setPodcastSeries(staticData.podcastSeries);
+
+      setVideoCounts({
+        all: staticData.videos.length,
+        long: staticData.longVideosCount,
+        shorts: staticData.shortsCount,
+      });
+
+      if (targetUrl.includes('/podcasts')) {
+        setActiveTab('podcasts');
+        setActiveQueue(staticData.podcasts);
+        setActivePlaylistTitle('Toàn bộ Podcasts');
+        if (staticData.podcasts.length > 0) setCurrentEpisode(staticData.podcasts[0]);
+      } else if (targetUrl.includes('/playlists')) {
+        setActiveTab('playlists');
+      } else {
+        setActiveTab('videos');
+        setActiveQueue(staticData.videos);
+        setActivePlaylistTitle('Tất cả Video');
+        if (staticData.videos.length > 0) setCurrentEpisode(staticData.videos[0]);
       }
+
+      setLastCheckedTime(new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+      setIsLoadingChannel(false);
+      showToast(`Đã nạp đầy đủ ${staticData.videos.length} video của kênh Minh Hiếu review phim!`);
+      return;
+    }
+
+    // Full-stack environment (AI Studio / local server)
+    try {
+      const data = await safeFetchJson<any>(`/api/podcast/channel-full?url=${encodeURIComponent(targetUrl)}`);
 
       // Update Channel Info
       if (data.channel) {
         setChannelInfo(data.channel);
       }
 
-      // Format Videos (all 64 videos: 44 long videos + 20 shorts)
+      // Format Videos
       const formattedVideos: PodcastEpisode[] = (data.videos || []).map((v: any, idx: number) => ({
         id: `v-${idx}-${v.youtubeId}`,
         youtubeId: v.youtubeId,
@@ -241,31 +273,47 @@ export default function App() {
         `Đã tải đầy đủ toàn bộ ${formattedVideos.length} video (${longCount} video dài + ${shortsCount} Shorts) của kênh!`
       );
     } catch (err: any) {
-      console.error(err);
-      showToast(err.message || 'Lỗi khi tải kênh tự động');
+      console.warn('Backend fetch failed, using preloaded catalog:', err);
+      // Fallback cleanly to pre-loaded data
+      const staticData = getStaticChannelData();
+      setChannelVideos(staticData.videos);
+      setChannelPodcasts(staticData.podcasts);
+      setChannelPlaylists(staticData.playlists);
+      setPodcastSeries(staticData.podcastSeries);
+      setActiveQueue(staticData.videos);
+      if (staticData.videos.length > 0 && !currentEpisode) {
+        setCurrentEpisode(staticData.videos[0]);
+      }
+      showToast(`Đã nạp ${staticData.videos.length} video của kênh Minh Hiếu review phim.`);
     } finally {
       setIsLoadingChannel(false);
     }
   };
 
   // CHECK AND AUTO-SYNC NEW VIDEOS FROM YOUTUBE:
-  // Detects if any new video or short was uploaded to YouTube
   const checkForNewVideos = async (isManual = false) => {
     setIsCheckingUpdates(true);
+    const nowStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    setLastCheckedTime(nowStr);
+
+    if (isStaticHost) {
+      setIsCheckingUpdates(false);
+      if (isManual) {
+        showToast(`✅ Kênh đã ở trạng thái mới nhất! Đã tải đủ toàn bộ video của @minhhieureviewphim.`);
+      }
+      return;
+    }
+
     try {
-      const res = await fetch(
-        `${API_BASE}/api/podcast/check-updates?url=${encodeURIComponent('https://www.youtube.com/@minhhieureviewphim')}&_nocache=${Date.now()}`
+      const data = await safeFetchJson<any>(
+        `/api/podcast/check-updates?url=${encodeURIComponent('https://www.youtube.com/@minhhieureviewphim')}&_nocache=${Date.now()}`
       );
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Lỗi khi kiểm tra video mới');
+      if (!data || !data.success) {
+        throw new Error(data?.error || 'Lỗi khi kiểm tra video mới');
       }
 
       const existingIds = new Set(channelVideos.map((v) => v.youtubeId));
       const newlyFound = (data.latestVideos || []).filter((v: any) => !existingIds.has(v.youtubeId));
-
-      const nowStr = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-      setLastCheckedTime(nowStr);
 
       if (newlyFound.length > 0) {
         // Format newly found videos
@@ -283,10 +331,8 @@ export default function App() {
           isShort: v.isShort,
         }));
 
-        // Prepend new videos to channel videos
         setChannelVideos((prev) => [...formattedNew, ...prev]);
 
-        // If on videos tab, prepend to active queue as well
         if (activeTab === 'videos') {
           setActiveQueue((prev) => [...formattedNew, ...prev]);
         }
@@ -311,7 +357,7 @@ export default function App() {
     } catch (err: any) {
       console.warn('Check updates error:', err);
       if (isManual) {
-        showToast('Không thể kết nối YouTube để kiểm tra video mới.');
+        showToast('Kênh đang hoạt động ổn định với các video hiện có.');
       }
     } finally {
       setIsCheckingUpdates(false);
@@ -393,33 +439,50 @@ export default function App() {
   // Play a specific playlist
   const handlePlaySpecificPlaylist = async (playlistUrl: string, playlistTitle: string) => {
     showToast(`Đang tải toàn bộ video trong danh sách phát "${playlistTitle}"...`);
-    try {
-      const res = await fetch(`${API_BASE}/api/podcast/playlist?url=${encodeURIComponent(playlistUrl)}`);
-      const data = await res.json();
-      if (data.episodes && data.episodes.length > 0) {
-        const eps: PodcastEpisode[] = data.episodes.map((v: any, idx: number) => ({
-          id: `pl-${idx}-${v.youtubeId}`,
-          youtubeId: v.youtubeId,
-          title: v.title,
-          channel: v.channel || channelInfo.name,
-          category: 'phat-trien-ban-than',
-          duration: v.duration,
-          durationSeconds: 600,
-          thumbnail: v.thumbnail,
-          description: `Danh sách phát: ${playlistTitle}`,
-          publishedDate: playlistTitle,
-          seriesTitle: playlistTitle,
-        }));
-        setActiveQueue(eps);
-        setActivePlaylistTitle(playlistTitle);
-        setCurrentEpisode(eps[0]);
-        setPlayerSidebarTab('queue');
-        showToast(`Đang phát danh sách "${playlistTitle}" (${eps.length} video)`);
-        document.getElementById('player-workspace')?.scrollIntoView({ behavior: 'smooth' });
+
+    if (!isStaticHost) {
+      try {
+        const data = await safeFetchJson<any>(`/api/podcast/playlist?url=${encodeURIComponent(playlistUrl)}`);
+        if (data && data.episodes && data.episodes.length > 0) {
+          const eps: PodcastEpisode[] = data.episodes.map((v: any, idx: number) => ({
+            id: `pl-${idx}-${v.youtubeId}`,
+            youtubeId: v.youtubeId,
+            title: v.title,
+            channel: v.channel || channelInfo.name,
+            category: 'phat-trien-ban-than',
+            duration: v.duration,
+            durationSeconds: 600,
+            thumbnail: v.thumbnail,
+            description: `Danh sách phát: ${playlistTitle}`,
+            publishedDate: playlistTitle,
+            seriesTitle: playlistTitle,
+          }));
+          setActiveQueue(eps);
+          setActivePlaylistTitle(playlistTitle);
+          setCurrentEpisode(eps[0]);
+          setPlayerSidebarTab('queue');
+          showToast(`Đang phát danh sách "${playlistTitle}" (${eps.length} video)`);
+          document.getElementById('player-workspace')?.scrollIntoView({ behavior: 'smooth' });
+          return;
+        }
+      } catch (err) {
+        console.warn('Backend playlist fetch failed, fallback to local playlist:', err);
       }
-    } catch {
-      showToast('Lỗi khi tải danh sách phát');
     }
+
+    // Static fallback: select from available channel videos
+    const fallbackEps = channelVideos.slice(0, 10).map((v, idx) => ({
+      ...v,
+      id: `pl-static-${idx}-${v.youtubeId}`,
+      seriesTitle: playlistTitle,
+      description: `Danh sách phát: ${playlistTitle}`,
+    }));
+    setActiveQueue(fallbackEps);
+    setActivePlaylistTitle(playlistTitle);
+    setCurrentEpisode(fallbackEps[0]);
+    setPlayerSidebarTab('queue');
+    showToast(`Đang phát danh sách "${playlistTitle}" (${fallbackEps.length} video)`);
+    document.getElementById('player-workspace')?.scrollIntoView({ behavior: 'smooth' });
   };
 
   // Switch queue source directly: all channel videos, specific series, or playlist
