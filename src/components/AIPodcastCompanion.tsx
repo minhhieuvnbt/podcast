@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { PodcastEpisode } from '../types/podcast';
 import { parseTimeString } from '../utils/youtube';
-import { safeFetchJson, generateClientAIAnalysis } from '../utils/api';
 
 interface AIPodcastCompanionProps {
   episode: PodcastEpisode;
@@ -38,60 +37,37 @@ export const AIPodcastCompanion: React.FC<AIPodcastCompanionProps> = ({
     setError(null);
 
     try {
-      // First try backend API if available
-      try {
-        const data = await safeFetchJson<{ result: string }>('/api/podcast/ai', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action,
-            title: episode.title,
-            host: episode.channel,
-            description: episode.description,
-            videoId: episode.youtubeId,
-            question,
-          }),
-        });
+      const response = await fetch('/api/podcast/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          title: episode.title,
+          host: episode.channel,
+          description: episode.description,
+          videoId: episode.youtubeId,
+          question,
+        }),
+      });
 
-        if (data && data.result) {
-          if (action === 'qa' && question) {
-            setQaHistory((prev) => [...prev, { question, answer: data.result }]);
-            setQuestionInput('');
-          } else {
-            setResults((prev) => ({
-              ...prev,
-              [`${episode.id}_${action}`]: data.result,
-            }));
-          }
-          return;
-        }
-      } catch (backendErr) {
-        // Fallback gracefully for static environments like GitHub Pages
-        console.warn('Backend AI not available or static hosting, using client generator:', backendErr);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Có lỗi xảy ra khi phân tích Podcast');
       }
 
-      // Client-side instant generation
-      await new Promise((r) => setTimeout(r, 600));
-      const clientResult = generateClientAIAnalysis(
-        action,
-        episode.title,
-        episode.channel,
-        episode.description,
-        question
-      );
-
       if (action === 'qa' && question) {
-        setQaHistory((prev) => [...prev, { question, answer: clientResult }]);
+        setQaHistory((prev) => [...prev, { question, answer: data.result }]);
         setQuestionInput('');
       } else {
         setResults((prev) => ({
           ...prev,
-          [`${episode.id}_${action}`]: clientResult,
+          [`${episode.id}_${action}`]: data.result,
         }));
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Không thể tạo phân tích AI');
+      setError(err.message || 'Không thể kết nối với dịch vụ AI');
     } finally {
       setLoading(false);
     }
